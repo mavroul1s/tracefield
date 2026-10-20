@@ -59,7 +59,7 @@ function updateHint() {
 function clearPreset() { document.querySelectorAll('[data-preset]').forEach(b=>{b.classList.remove('active');b.setAttribute('aria-pressed','false');}); }
 function setPreset(name) {
   const styles = {
-    classic:{boxes:true,labels:true,centers:true,connections:true,trails:false,color:'#c5f56b',lineWidth:1.5,sourceOpacity:65,grayscale:true},
+    classic:{boxes:true,labels:true,centers:true,connections:true,trails:false,color:'#c5f56b',lineWidth:1.5,sourceOpacity:65,grayscale:false},
     technical:{boxes:true,labels:true,centers:true,connections:true,trails:false,color:'#ffffff',lineWidth:1,sourceOpacity:80,grayscale:true},
     trails:{boxes:true,labels:true,centers:true,connections:false,trails:true,color:'#c5f56b',lineWidth:1.5,sourceOpacity:35,grayscale:true}
   };
