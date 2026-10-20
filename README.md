@@ -31,7 +31,7 @@ For native local conversion, install `imageio-ffmpeg` into `.local-tools/python`
 
 Uploads are checked for decoded video dimensions, so an audio-only playback success cannot produce a black export with stale demo tracking. Detection is automatically tuned on upload; Original / Effect / Mask views make the source and output easy to compare.
 
-Video export runs at playback speed using the browser's MediaRecorder encoder, at up to 30 FPS. Keep the tab visible. The app offers MP4 if the browser supports it, otherwise WebM. Original audio is included through Web Audio when enabled. Export resolution can be 720p, 1080p, or original up to 4K, without upscaling the source.
+Video export processes every frame with WebCodecs and produces a regular, fast-start H.264 MP4 at a constant 30 FPS. Rendering waits for the detector and encoder instead of dropping frames when the device is busy. Video bitrate is bounded between 4 and 24 Mbps, with key frames every second for easier seeking on phones such as the Pixel 10. Compatible AAC-LC sound is preserved; other audio is converted to AAC, using the local browser converter if the browser has no AAC encoder. Keep the tab open until export finishes; rendering can take longer than playback on slower devices. Export resolution can be 720p, 1080p, or original up to 4K, without upscaling the source. Source footage with low frame rates or existing freezes retains those limitations.
 
 Detection uses luminance or background difference, connected components, and centroid matching. It is an artistic effect, not semantic object recognition. IDs can change on occlusion, overlap, large cuts or sudden motion. Higher Detection detail improves small blobs at the cost of processing speed.
 
@@ -39,4 +39,6 @@ The built-in animated demo runs through the same detector as uploaded footage.
 
 ## Verification
 
-`npm test` checks detection, motion, noise filtering, ID matching, automatic tuning, and decoded-video validation. `npm run check` checks app and tracker syntax.
+`npm test` checks detection, motion, noise filtering, ID matching, automatic tuning, decoded-video validation, and the export profile. `npm run check` checks all application modules. The standalone build includes [Mediabunny 1.61.6](dist/vendor/README.md), with its MPL-2.0 notice and license; it needs no npm installation to run.
+
+For the optional native integration check, set `BLOB_TRACKER_TEST_FFMPEG` to an FFmpeg executable and `BLOB_TRACKER_TEST_CANVAS` to an installed `@napi-rs/canvas` module, then run `npm test`. This tests the actual export and muxing pipeline with native codec adapters: slow rendering, 30 FPS timestamps, AAC audio, audio disabled, the audio fallback, and cancellation. It does not replace testing browser WebCodecs or playback on a physical phone.

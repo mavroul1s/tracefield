@@ -2,14 +2,23 @@ import { readFile, writeFile } from 'node:fs/promises';
 
 // Development packaging only. The generated HTML runs without Node or a server.
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');
-const [template, css, tracker, media, app, worker] = await Promise.all([
+const [template, css, tracker, media, exporter, engine, app, worker] = await Promise.all([
   read('./dist/index.html'), read('./dist/style.css'), read('./dist/tracker.mjs'),
-  read('./dist/media.mjs'), read('./dist/app.js'), read('./dist/conversion-worker.js')
+  read('./dist/media.mjs'), read('./dist/export.mjs'), read('./dist/vendor/mediabunny.mjs'),
+  read('./dist/app.js'), read('./dist/conversion-worker.js')
 ]);
 const withoutExports = source => source.replace(/^export\s+/gm, '');
 const withoutImports = source => source.replace(/^import\s+.*?;\r?\n/gm, '');
 const safeScript = source => source.replace(/<\/script/gi, '<\\/script');
-const script = [withoutExports(tracker), withoutExports(media), withoutImports(app)].join('\n\n');
+// Keep the vendored module in its own scope, retaining its MPL notice. No runtime CDN is needed.
+const engineExports = /export\s*\{([^}]+)\};?\s*$/;
+if (!engineExports.test(engine)) throw new Error('The media engine export format changed.');
+const engineClosure = engine.replace(engineExports, (_, list) => `return {${list.split(',').map(entry => {
+  const [local, name = local] = entry.trim().split(/\s+as\s+/);
+  return `${name}:${local}`;
+}).join(',')}};`);
+const script = [`const MediaEngine = (()=>{\n${engineClosure}\n})();`, withoutExports(tracker), withoutExports(media),
+  withoutExports(withoutImports(exporter)), withoutImports(app)].join('\n\n');
 const stylesheetTag = '<link rel="stylesheet" href="./style.css">';
 const appTag = '<script type="module" src="./app.js"></script>';
 if (!template.includes(stylesheetTag) || !template.includes(appTag)) {

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.mjs",
     "build:standalone": "node build-standalone.mjs",
-    "test": "node --test tracker.test.mjs media.test.mjs",
-    "check": "node --check dist/app.js && node --check dist/tracker.mjs"
+    "test": "node --test tracker.test.mjs media.test.mjs export.test.mjs",
+    "check": "node --check dist/app.js && node --check dist/tracker.mjs && node --check dist/media.mjs && node --check dist/export.mjs && node --check dist/conversion-worker.js"
   }
 }

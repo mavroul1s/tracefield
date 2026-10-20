@@ -25,6 +25,14 @@ export async function convertVideo(file, { signal, onProgress = () => {} } = {})
     }
   }
   if (file.size > 500 * 1024 * 1024) throw new Error('This file is too large for browser conversion. Use the local app or convert it to H.264 MP4 first.');
+  return runMediaWorker({file}, {signal, onProgress});
+}
+
+export function muxExportAudio(file, audio, {duration, ...options} = {}) {
+  return runMediaWorker({file, audio, duration, mode:'mux-audio'}, options);
+}
+
+function runMediaWorker(job, { signal, onProgress = () => {} } = {}) {
   onProgress('Loading the browser video converter (31 MB)…', null);
   return new Promise((resolve,reject) => {
     const embeddedSource = document.getElementById('conversionWorkerSource')?.textContent;
@@ -49,6 +57,6 @@ export async function convertVideo(file, { signal, onProgress = () => {} } = {})
     worker.onerror = () => finish(new Error('The browser video converter could not start. Check your connection or use the local app.'));
     if(signal?.aborted){abort();return;}
     signal?.addEventListener('abort',abort,{once:true});
-    worker.postMessage({file});
+    worker.postMessage(job);
   });
 }

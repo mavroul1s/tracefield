@@ -1,5 +1,6 @@
 import { BlobTracker, connectionEdges, tuneDetection } from './tracker.mjs';
 import { validateVideoFrame, convertVideo } from './media.mjs';
+import { exportMp4, EXPORT_FPS } from './export.mjs';
 
 const $ = id => document.getElementById(id);
 const canvas = $('outputCanvas'), ctx = canvas.getContext('2d');
@@ -16,15 +17,15 @@ const ranges = { threshold:'', minArea:' px', maxBlobs:'', smoothing:'%', lineWi
 let settings = { ...defaults }, demo = true, playing = true, demoTime = 0, demoLast = performance.now();
 let sourceUrl = null, sourceName = 'motion-study', loaded = false, maskView = false, originalView = false, dirty = true, lastMediaTime = -1;
 let frame = 0, tracks = [], muted = true, fps = 30, framesSinceStats = 0, lastStats = performance.now();
-let recorder = null, recordingStream = null, exporting = false, cancelled = false, downloadUrl = null;
-let audioContext = null, audioSource = null, audioDestination = null, previewGain = null, pendingLoad = false;
-let exportPrevious = null, cancellationReason = '';
+let exporting = false, downloadUrl = null, exportController = null, exportTime = 0;
+let pendingLoad = false, sourceBlob = null;
+let exportPrevious = null;
 let importController = null;
 
 function notice(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
 function formatTime(t) { if (!Number.isFinite(t)) t = 0; return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(Math.floor(t%60)).padStart(2,'0')}`; }
 function duration() { return demo ? 12 : (Number.isFinite(video.duration) ? video.duration : 0); }
-function mediaTime() { return demo ? demoTime : video.currentTime; }
+function mediaTime() { return exporting ? exportTime : demo ? demoTime : video.currentTime; }
 function dimensions() { return demo ? [1280,720] : [video.videoWidth,video.videoHeight]; }
 function resizeOutput() {
   const [w,h] = dimensions();
@@ -135,10 +136,10 @@ function drawOverlay() {
   }
   ctx.restore();
 }
-function render(advance) {
-  if (!demo && (!loaded || video.readyState < 2 || !video.videoWidth || !video.videoHeight)) return false;
-  if(demo) drawDemo(demoTime);
-  const source = demo ? sourceCanvas : video;
+function render(advance, sourceOverride = null) {
+  if (!sourceOverride && !demo && (!loaded || video.readyState < 2 || !video.videoWidth || !video.videoHeight)) return false;
+  if(demo && !sourceOverride) drawDemo(demoTime);
+  const source = sourceOverride || (demo ? sourceCanvas : video);
   const [w,h]=dimensions(),aw=Math.round(settings.quality),ah=Math.max(2,Math.round(aw*h/w));
   // Portrait clips get the same pixel budget as landscape clips.
   const finalW=w<h?Math.max(2,Math.round(settings.quality*w/h)):aw,finalH=w<h?aw:ah;
@@ -166,14 +167,14 @@ function updatePlaybackUi() {
 }
 function loop(now) {
   const dt=Math.min((now-demoLast)/1000,.1);demoLast=now;
-  if(demo && playing){demoTime+=dt;if(demoTime>=12){if(exporting){demoTime=12;render(true);stopExport();}else{demoTime%=12;resetTracker();}}}
+  if(exporting){updatePlaybackUi();requestAnimationFrame(loop);return;}
+  if(demo && playing){demoTime+=dt;if(demoTime>=12){demoTime%=12;resetTracker();}}
   const t=mediaTime();
   if((demo || loaded) && (dirty || t!==lastMediaTime)) {
     const advance=t!==lastMediaTime;if(render(advance)!==false){lastMediaTime=t;dirty=false;}
   }
   if(now-lastStats>450){fps=Math.round(framesSinceStats*1000/(now-lastStats));$('fps').textContent=(demo?playing:!video.paused)?Math.min(fps,60):'—';$('blobCount').textContent=tracks.length;lastStats=now;framesSinceStats=0;}
   updatePlaybackUi();
-  if(exporting){const percentage=duration()?Math.min(100,t/duration()*100):0;$('exportProgress').value=percentage;$('exportTitle').textContent=`Rendering your video… ${Math.floor(percentage)}%`;}
   requestAnimationFrame(loop);
 }
 async function togglePlay() {
@@ -190,7 +191,7 @@ function seek(time) {
 $('playButton').addEventListener('click',togglePlay);$('restartButton').addEventListener('click',()=>seek(0));
 $('scrubber').addEventListener('input',()=>seek(Number($('scrubber').value)));
 document.addEventListener('keydown',e=>{if(e.code==='Space'&&!['INPUT','SELECT','BUTTON','A'].includes(document.activeElement.tagName)&&!$('helpDialog').open){e.preventDefault();togglePlay();}});
-$('muteButton').addEventListener('click',async()=>{muted=!muted;if(audioContext){await audioContext.resume();previewGain.gain.value=muted?0:1;video.muted=false;}else video.muted=muted;$('muteButton').textContent=muted?'Sound off':'Sound on';});
+$('muteButton').addEventListener('click',()=>{muted=!muted;video.muted=muted;$('muteButton').textContent=muted?'Sound off':'Sound on';});
 $('fullscreenButton').addEventListener('click',async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await $('dropZone').requestFullscreen();}catch{notice('Fullscreen is unavailable in this browser.');}});
 function setView(mask){originalView=false;maskView=mask;$('sourceView').classList.remove('active');$('sourceView').setAttribute('aria-pressed','false');$('effectView').classList.toggle('active',!mask);$('maskView').classList.toggle('active',mask);$('effectView').setAttribute('aria-pressed',!mask);$('maskView').setAttribute('aria-pressed',mask);dirty=true;}
 function showOriginal(){setView(false);originalView=true;$('sourceView').classList.add('active');$('sourceView').setAttribute('aria-pressed','true');$('effectView').classList.remove('active');$('effectView').setAttribute('aria-pressed','false');dirty=true;}
@@ -203,7 +204,7 @@ function setLoadingUi(active){
 }
 function loadMedia(blob,signal){
   if(sourceUrl)URL.revokeObjectURL(sourceUrl);
-  sourceUrl=URL.createObjectURL(blob);video.src=sourceUrl;video.muted=true;video.loop=true;video.playbackRate=1;
+  sourceBlob=blob;sourceUrl=URL.createObjectURL(blob);video.src=sourceUrl;video.muted=true;video.loop=true;video.playbackRate=1;
   return new Promise((resolve,reject)=>{
     const timer=setTimeout(()=>finish(new Error('Opening this video timed out.')),15000);
     const ok=()=>{try{validateVideoFrame(video);finish();}catch(error){finish(error);}};
@@ -249,7 +250,7 @@ async function loadFile(file) {
     $('clipSubtitle').textContent=`${video.videoWidth} × ${video.videoHeight} · ${formatTime(video.duration)} · ${(file.size/1024/1024).toFixed(1)} MB${converted?' · converted locally':''}`;
     $('muteButton').disabled=false;resizeOutput();resetTracker();hideDownload();
     settings.sourceOpacity=100;settings.grayscale=false;syncControls();setView(false);autoTune(false);render(true);
-    video.muted=audioContext?false:muted;if(previewGain)previewGain.gain.value=muted?0:1;
+    video.muted=muted;
     try{await video.play();notice(converted?'Your MOV was converted locally. The original footage and tracking effect are ready.':'Video ready. Detection is tuned to your footage.');}catch{notice('Video ready. Press Play to start.');}
   } catch(e){video.pause();loaded=false;tracks=[];ctx.clearRect(0,0,canvas.width,canvas.height);$('clipSubtitle').textContent='No decoded video frames — export disabled.';notice(signal.aborted?'Video loading cancelled.':e.message,true);}
   finally{pendingLoad=false;importController=null;setLoadingUi(false);$('fileInput').value='';}
@@ -262,14 +263,13 @@ $('dropZone').addEventListener('dragleave',()=>{if(--dragDepth<=0){dragDepth=0;$
 $('dropZone').addEventListener('drop',e=>{e.preventDefault();dragDepth=0;$('dropZone').classList.remove('dragover');loadFile(e.dataTransfer.files[0]);});
 function loadDemo(showNotice=true) {
   if(exporting)return;video.pause();if(sourceUrl){URL.revokeObjectURL(sourceUrl);sourceUrl=null;}video.removeAttribute('src');video.load();
-  demo=true;loaded=false;playing=true;demoTime=0;demoLast=performance.now();sourceName='motion-study';
+  demo=true;loaded=false;sourceBlob=null;playing=true;demoTime=0;demoLast=performance.now();sourceName='motion-study';
   setLoadingUi(false);
   $('fileName').textContent='Built-in motion study';$('demoTag').hidden=false;$('clipTitle').textContent='Start with your own footage';$('clipSubtitle').textContent='Drop a video onto the preview, or use Upload video.';$('muteButton').disabled=true;
   resizeOutput();resetTracker();hideDownload();if(showNotice)notice('Demo loaded. Upload your own video whenever you’re ready.');
 }
 $('demoButton').addEventListener('click',()=>loadDemo());
-video.addEventListener('seeked',()=>{dirty=true;});video.addEventListener('ended',()=>{if(exporting){dirty=true;render(true);stopExport();}});
-video.addEventListener('error',()=>{if(exporting){cancelled=true;cancellationReason='The video could not be read during export.';stopExport();}});
+video.addEventListener('seeked',()=>{dirty=true;});
 video.addEventListener('timeupdate',()=>{if(!exporting&&video.loop&&video.currentTime<lastMediaTime-.2)resetTracker();});
 
 function saveBlob(blob,name) { const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000); }
@@ -279,57 +279,33 @@ function setExportUi(active) {
   exporting=active;document.body.classList.toggle('exporting',active);$('exportPanel').hidden=!active;
   for(const id of ['uploadButton','exportButton','demoButton','playButton','restartButton','scrubber','resetButton','snapshotButton','muteButton','effectView','maskView','sourceView','autoTune'])$(id).disabled=active||(id==='muteButton'&&demo);
 }
-function onceSeek(target) {
-  if(Math.abs(video.currentTime-target)<.001)return Promise.resolve();
-  return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{video.removeEventListener('seeked',done);reject(new Error('Could not seek to the start of the video.'));},7000);function done(){clearTimeout(timer);resolve();}video.addEventListener('seeked',done,{once:true});video.currentTime=target;});
-}
-async function prepareAudio() {
-  if(!audioContext){const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw new Error('Audio export is unavailable. Turn off Include original audio and try again.');audioContext=new Audio();audioSource=audioContext.createMediaElementSource(video);audioDestination=audioContext.createMediaStreamDestination();previewGain=audioContext.createGain();audioSource.connect(audioDestination);audioSource.connect(previewGain);previewGain.connect(audioContext.destination);}
-  await audioContext.resume();previewGain.gain.value=0;video.muted=false;
-  return audioDestination.stream.getAudioTracks();
-}
 async function startExport() {
   if(exporting||pendingLoad)return;
-  if(!window.MediaRecorder||!canvas.captureStream){notice('Video export is unavailable in this browser. Open the app in Chrome or Edge, or use Save frame.',true);return;}
   if(!demo){try{validateVideoFrame(video);}catch(error){notice(error.message+' Load a supported video before exporting.',true);return;}}
   exportPrevious={time:mediaTime(),playing:demo?playing:!video.paused,mask:maskView,original:originalView};
-  cancelled=false;cancellationReason='';hideDownload();notice('');setExportUi(true);setView(false);$('exportProgress').value=0;
+  exportController=new AbortController();exportTime=0;hideDownload();notice('');
+  video.pause();playing=false;setExportUi(true);setView(false);resetTracker();$('exportProgress').value=0;
   try {
-    if(demo){playing=false;demoTime=0;}else{video.pause();video.loop=false;video.playbackRate=1;await onceSeek(0);}
-    if(cancelled)throw new Error('Export cancelled.');
-    resetTracker();if(render(true)===false)throw new Error('No decoded video frame is available. Export stopped.');
-    recordingStream=canvas.captureStream(30);
-    if(!demo&&settings.includeAudio)for(const track of await prepareAudio())recordingStream.addTrack(track.clone());
-    if(cancelled)throw new Error('Export cancelled.');
-    const codecs=['video/mp4;codecs=avc1.42001E,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
-    const mimeType=codecs.find(type=>MediaRecorder.isTypeSupported(type));
-    if(!mimeType)throw new Error('This browser has no supported video encoder. Try Chrome or Edge.');
-    recorder=new MediaRecorder(recordingStream,{mimeType,videoBitsPerSecond:Math.max(4000000,canvas.width*canvas.height*5)});
-    const chunks=[];recorder.addEventListener('dataavailable',e=>{if(e.data.size)chunks.push(e.data);});
-    recorder.addEventListener('error',()=>{cancelled=true;cancellationReason='The browser encoder failed. Try 720p and export again.';stopExport();});
-    recorder.addEventListener('stop',()=>{
-      const actualType=recorder.mimeType, blob=new Blob(chunks,{type:actualType});
-      recordingStream?.getTracks().forEach(t=>t.stop());recordingStream=null;recorder=null;
-      setExportUi(false);restorePlayback();
-      if(!cancelled&&blob.size){const ext=actualType.includes('mp4')?'mp4':'webm';downloadUrl=URL.createObjectURL(blob);$('downloadLink').href=downloadUrl;$('downloadLink').download=`${sourceName}-tracefield.${ext}`;$('downloadDetail').textContent=`${ext.toUpperCase()} · ${(blob.size/1024/1024).toFixed(1)} MB · ${canvas.width} × ${canvas.height}`;$('downloadPanel').hidden=false;notice('Export complete. Your download is ready.');}else if(cancelled)notice(cancellationReason||'Export cancelled.',Boolean(cancellationReason));
-    },{once:true});
-    recorder.start(1000);
-    if(demo){demoTime=0;playing=true;demoLast=performance.now();}else await video.play();
-  } catch(e) {
-    if(!cancelled)cancellationReason=e.message||'Could not export the video. Try 720p.';
-    cancelled=true;
-    if(recorder&&recorder.state!=='inactive')recorder.stop();else{recordingStream?.getTracks().forEach(t=>t.stop());recordingStream=null;recorder=null;setExportUi(false);restorePlayback();}
-    notice(cancellationReason||'Export cancelled.',Boolean(cancellationReason));
+    const blob=await exportMp4({
+      canvas,file:demo?null:sourceBlob,duration:duration(),includeAudio:settings.includeAudio,signal:exportController.signal,
+      renderFrame:(source,time)=>{exportTime=time;if(demo)demoTime=time;if(render(true,source)===false)throw new Error('No decoded video frame is available.');},
+      onProgress:(progress,time,message)=>{exportTime=time;$('exportProgress').value=progress*100;$('exportTitle').textContent=`${message} ${Math.floor(progress*100)}%`;}
+    });
+    downloadUrl=URL.createObjectURL(blob);$('downloadLink').href=downloadUrl;$('downloadLink').download=`${sourceName}-tracefield.mp4`;
+    $('downloadDetail').textContent=`MP4 · ${EXPORT_FPS} FPS · ${(blob.size/1024/1024).toFixed(1)} MB · ${canvas.width} × ${canvas.height}`;
+    $('downloadPanel').hidden=false;notice('Export complete. Your download is ready.');
+  } catch(error) {
+    const aborted=exportController.signal.aborted;
+    notice(aborted?'Export cancelled.':error.message||'Could not export the video. Try 720p.',!aborted);
+  } finally {
+    exportController=null;setExportUi(false);restorePlayback();
   }
 }
 function restorePlayback() {
-  if(previewGain)previewGain.gain.value=muted?0:1;
   if(exportPrevious){setView(exportPrevious.mask);if(exportPrevious.original)showOriginal();if(demo){demoTime=exportPrevious.time;playing=exportPrevious.playing;demoLast=performance.now();}else{video.loop=true;video.currentTime=exportPrevious.time;if(exportPrevious.playing)video.play().catch(()=>{});else video.pause();}}
-  resetTracker();dirty=true;
+  exportPrevious=null;resetTracker();dirty=true;
 }
-function stopExport() {if(!exporting)return;if(demo)playing=false;else video.pause();if(recorder&&recorder.state!=='inactive')recorder.stop();}
-$('exportButton').addEventListener('click',startExport);$('cancelExport').addEventListener('click',()=>{cancelled=true;stopExport();});
-document.addEventListener('visibilitychange',()=>{if(exporting&&document.hidden){cancelled=true;cancellationReason='Export stopped because the tab was hidden. Keep the app visible while rendering.';stopExport();}});
+$('exportButton').addEventListener('click',startExport);$('cancelExport').addEventListener('click',()=>exportController?.abort());
 $('helpButton').addEventListener('click',()=>$('helpDialog').showModal());$('closeHelp').addEventListener('click',()=>$('helpDialog').close());$('helpDone').addEventListener('click',()=>$('helpDialog').close());
 $('helpDialog').addEventListener('click',e=>{if(e.target===$('helpDialog')){const r=$('helpDialog').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)$('helpDialog').close();}});
 window.addEventListener('beforeunload',()=>{if(sourceUrl)URL.revokeObjectURL(sourceUrl);if(downloadUrl)URL.revokeObjectURL(downloadUrl);});
