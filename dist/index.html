@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#141615">
+  <meta name="author" content="Nikolaos Mavros (mavroul1s)">
   <meta name="description" content="Turn your videos into a live blob tracking effect. Adjust boxes, IDs, connections and trails, then export directly in your browser.">
   <title>Tracefield — Video Studio</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23141615'/%3E%3Cpath d='M8 13V8h5m6 0h5v5m0 6v5h-5m-6 0H8v-5' fill='none' stroke='%23c5f56b' stroke-width='2'/%3E%3C/svg%3E">
@@ -77,6 +78,7 @@
         <section class="control-section"><h3><span>03</span> Output</h3><label class="field-label" for="quality">Detection detail</label><select id="quality"><option value="256">Fast · 256 px</option><option value="384" selected>Balanced · 384 px</option><option value="640">Fine · 640 px</option></select><label class="field-label" for="exportSize">Export resolution</label><select id="exportSize"><option value="720">720p · faster</option><option value="1080" selected>1080p</option><option value="source">Original · up to 4K</option></select><label class="toggle-row">Include original audio<input id="includeAudio" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label></section>
       </aside>
     </div>
+    <footer class="designer-credit">Designed by <a href="https://github.com/mavroul1s" target="_blank" rel="noopener noreferrer">Nikolaos Mavros (mavroul1s)</a></footer>
   </main>
   <video id="sourceVideo" class="source-video" playsinline preload="auto" muted aria-hidden="true" tabindex="-1"></video>
   <dialog id="helpDialog"><div class="dialog-heading"><h2>A quick field guide.</h2><button id="closeHelp" class="icon-button" aria-label="Close help">×</button></div><ol><li><strong>Load a clip.</strong> Drop your video onto the canvas. MP4 and WebM work well; other formats depend on your browser.</li><li><strong>Find your subjects.</strong> Bright areas works for light subjects; Dark areas for dark subjects. Moving areas compares against a slowly adapting background and works best with a fixed camera.</li><li><strong>Tune the threshold.</strong> Use Detection mask to see exactly what is detected. Raise Minimum blob size to remove noise.</li><li><strong>Make it yours.</strong> Change boxes, labels, links, trails and video visibility. IDs follow nearby blobs; they can change when objects merge or overlap.</li><li><strong>Export.</strong> Render every frame and download a smooth 30 FPS MP4, or save a single frame. Keep this tab open until export finishes.</li></ol><p>Your video is read locally. Nothing is sent to a server.</p><button id="helpDone" class="button primary full">Got it</button></dialog>

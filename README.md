@@ -1,5 +1,7 @@
 # Tracefield
 
+Designed by [Nikolaos Mavros (mavroul1s)](https://github.com/mavroul1s).
+
 **[Open the app →](https://mavroul1s.github.io/blob-tracker-studio/)**
 
 Start using it directly in your browser. No download, installation, or Node.js required.
