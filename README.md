@@ -10,6 +10,10 @@ A browser tool for a TouchDesigner-style blob tracking overlay. Drop in a video,
 
 Boxes, connections, and points / IDs can use their own colors. Enable **Separate colors** in Overlay, then use each color picker or enter a hex color. Turn it off to use one shared line color. Motion trails follow the point color.
 
+Enable **Box effects** in Overlay to open **X-ray**, **Zoom**, **Pixelate**, **Thermal**, and **Invert**. Select one or several effects to change the video inside every tracked box. Zoom magnifies the center by 2×; X-ray and Thermal use artistic luminance palettes. Combinations apply zoom, pixelation, X-ray, thermal, then inversion. The choices carry across presets and are included in PNG snapshots and MP4 exports. Reset turns box effects off.
+
+![Box effects rendered by the Tracefield canvas: Original, X-ray, Zoom, Pixelate, Thermal and Invert](docs/images/box-effects-preview.png)
+
 ## Run locally
 
 Download [blob-tracker.html](blob-tracker.html) and double-click it to open in Chrome or Edge. Everything needed for the interface, tracker, and export is included in this one file. No Node.js, installation, API key, or server is required.

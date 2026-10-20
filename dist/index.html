@@ -51,6 +51,14 @@
         </section>
         <section class="control-section"><h3><span>02</span> Overlay</h3>
           <label class="toggle-row">Bounding boxes<input id="boxes" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
+          <label class="toggle-row">Box effects<input id="boxEffects" type="checkbox" aria-controls="boxEffectsPanel" aria-expanded="false"><span class="switch" aria-hidden="true"></span></label>
+          <fieldset id="boxEffectsPanel" class="box-effects-panel" hidden><legend>Inside boxes</legend><div class="box-effects-options">
+            <label class="box-effect-option"><input id="fxXray" type="checkbox" checked>X-ray</label>
+            <label class="box-effect-option"><input id="fxZoom" type="checkbox">Zoom</label>
+            <label class="box-effect-option"><input id="fxPixelate" type="checkbox">Pixelate</label>
+            <label class="box-effect-option"><input id="fxThermal" type="checkbox">Thermal</label>
+            <label class="box-effect-option"><input id="fxInvert" type="checkbox">Invert</label>
+          </div></fieldset>
           <label class="toggle-row">Object IDs<input id="labels" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
           <label class="toggle-row">Center points<input id="centers" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
           <label class="toggle-row">Connecting lines<input id="connections" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>

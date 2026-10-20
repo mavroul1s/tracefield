@@ -18,6 +18,7 @@ main{max-width:1680px;margin:auto;padding:0 3.4%}.intro{display:flex;align-items
 .source-video{position:fixed;left:-100px;top:-100px;width:1px;height:1px;opacity:.01;pointer-events:none}body.importing .settings{pointer-events:none;opacity:.6}#importProgress{accent-color:var(--accent)}
 main{padding-bottom:24px}.intro{justify-content:flex-end;padding:24px 0}.clip-strip{justify-content:flex-end;padding:14px 0}.clip-strip #demoButton,.clip-strip #snapshotButton{margin-left:0}.notice:empty{display:none}
 .channel-color-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0;color:#b7c1b0;font-size:11px}.channel-color-fields{display:flex;align-items:center;gap:7px}.channel-color-fields input[type=color]{width:24px;height:24px;padding:2px;background:#22271f;border:1px solid #4a5540;border-radius:3px;cursor:pointer}.channel-color-fields input[type=color]::-webkit-color-swatch-wrapper{padding:0}.channel-color-fields input[type=color]::-webkit-color-swatch{border:0;border-radius:1px}.channel-color-fields input[type=text]{width:74px;padding:5px 4px;background:#22271f;border:1px solid #3a4333;border-radius:3px;font:10px var(--mono);color:#d4decd;text-align:center}.channel-color-fields input[aria-invalid=true]{border-color:#ff8c55}
+.box-effects-panel{min-width:0;margin:0 0 16px;padding:10px 11px 12px;border:1px solid #3a4333;border-radius:3px;background:#191e17}.box-effects-panel legend{padding:0 5px;color:#91a67d;font:9px var(--mono)}.box-effects-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(82px,1fr));gap:9px 8px}.box-effect-option{display:flex;align-items:center;gap:7px;min-height:22px;color:#c2cdb9;font-size:11px;cursor:pointer}.box-effect-option input{width:13px;height:13px;margin:0;accent-color:var(--accent);cursor:pointer}.box-effect-option input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 
 </style>
 </head>
@@ -63,6 +64,14 @@ main{padding-bottom:24px}.intro{justify-content:flex-end;padding:24px 0}.clip-st
         </section>
         <section class="control-section"><h3><span>02</span> Overlay</h3>
           <label class="toggle-row">Bounding boxes<input id="boxes" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
+          <label class="toggle-row">Box effects<input id="boxEffects" type="checkbox" aria-controls="boxEffectsPanel" aria-expanded="false"><span class="switch" aria-hidden="true"></span></label>
+          <fieldset id="boxEffectsPanel" class="box-effects-panel" hidden><legend>Inside boxes</legend><div class="box-effects-options">
+            <label class="box-effect-option"><input id="fxXray" type="checkbox" checked>X-ray</label>
+            <label class="box-effect-option"><input id="fxZoom" type="checkbox">Zoom</label>
+            <label class="box-effect-option"><input id="fxPixelate" type="checkbox">Pixelate</label>
+            <label class="box-effect-option"><input id="fxThermal" type="checkbox">Thermal</label>
+            <label class="box-effect-option"><input id="fxInvert" type="checkbox">Invert</label>
+          </div></fieldset>
           <label class="toggle-row">Object IDs<input id="labels" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
           <label class="toggle-row">Center points<input id="centers" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
           <label class="toggle-row">Connecting lines<input id="connections" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
@@ -515,6 +524,96 @@ async function exportMp4({ canvas, file, duration, includeAudio, renderFrame, si
 }
 
 
+const thermalStops = [[5,8,30],[30,20,115],[145,16,124],[235,54,44],[255,177,20],[255,255,220]];
+const thermalPalette = new Uint8ClampedArray(256 * 3);
+for (let i=0;i<256;i++) {
+  const position=i/255*(thermalStops.length-1), index=Math.min(thermalStops.length-2,Math.floor(position)), mix=position-index;
+  for(let c=0;c<3;c++)thermalPalette[i*3+c]=thermalStops[index][c]*(1-mix)+thermalStops[index+1][c]*mix;
+}
+
+function boxEffectRect(track, width, height) {
+  if(![track.x,track.y,track.w,track.h].every(Number.isFinite)||track.w<=0||track.h<=0)return null;
+  const left=Math.max(0,Math.floor(track.x*width)),top=Math.max(0,Math.floor(track.y*height));
+  const right=Math.min(width,Math.ceil((track.x+track.w)*width)),bottom=Math.min(height,Math.ceil((track.y+track.h)*height));
+  return right>left&&bottom>top?{x:left,y:top,w:right-left,h:bottom-top}:null;
+}
+
+// Artistic X-ray and thermal palettes, derived from image luminance.
+function applyBoxPalette(image, options, scratch) {
+  const {data,width,height}=image, count=width*height;
+  let luma;
+  if(options.fxXray) {
+    luma=scratch?.length>=count?scratch:new Uint8ClampedArray(count);
+    for(let i=0;i<count;i++){const p=i*4;luma[i]=.2126*data[p]+.7152*data[p+1]+.0722*data[p+2];}
+  }
+  for(let i=0;i<count;i++) {
+    const p=i*4;
+    let r=data[p],g=data[p+1],b=data[p+2];
+    if(options.fxXray) {
+      const x=i%width,y=Math.floor(i/width);
+      const edge=(Math.abs(luma[y*width+Math.max(0,x-1)]-luma[y*width+Math.min(width-1,x+1)])
+        +Math.abs(luma[Math.max(0,y-1)*width+x]-luma[Math.min(height-1,y+1)*width+x]))/255;
+      const value=Math.min(1,(1-luma[i]/255)*.82+edge*.9);
+      r=value*140;g=8+value*210;b=10+value*245;
+    }
+    if(options.fxThermal) {
+      const index=Math.max(0,Math.min(255,Math.round(.2126*r+.7152*g+.0722*b)))*3;
+      r=thermalPalette[index];g=thermalPalette[index+1];b=thermalPalette[index+2];
+    }
+    if(options.fxInvert){r=255-r;g=255-g;b=255-b;}
+    data[p]=r;data[p+1]=g;data[p+2]=b;
+  }
+  return image;
+}
+
+class BoxEffectsRenderer {
+  constructor(createCanvas=()=>document.createElement('canvas')) {
+    this.base=createCanvas();this.work=createCanvas();
+    this.baseCtx=this.base.getContext('2d');
+    this.workCtx=this.work.getContext('2d',{willReadFrequently:true});
+    this.luma=new Uint8ClampedArray(256*256);
+  }
+
+  draw(ctx, tracks, options) {
+    if(!options.boxEffects||!tracks.length||!['fxZoom','fxPixelate','fxXray','fxThermal','fxInvert'].some(key=>options[key]))return;
+    const width=ctx.canvas.width,height=ctx.canvas.height;
+    if(this.base.width!==width)this.base.width=width;
+    if(this.base.height!==height)this.base.height=height;
+    this.baseCtx.clearRect(0,0,width,height);
+    // Every box samples the same frame. Overlapping boxes never process an already altered box.
+    this.baseCtx.drawImage(ctx.canvas,0,0);
+    const colorPass=options.fxXray||options.fxThermal;
+    const blockSize=Math.max(3,Math.round(Math.min(width,height)/720*12));
+    for(const track of tracks) {
+      const rect=boxEffectRect(track,width,height);
+      if(!rect)continue;
+      const {x,y,w,h}=rect,zoom=options.fxZoom?2:1;
+      const sx=x+w*(1-1/zoom)/2,sy=y+h*(1-1/zoom)/2,sw=w/zoom,sh=h/zoom;
+      // Pixel effects have a bounded working size; zoom and invert retain full image detail.
+      const downscale=options.fxPixelate?blockSize:colorPass?Math.max(1,Math.max(w,h)/256):1;
+      const workWidth=Math.max(1,Math.round(w/downscale)),workHeight=Math.max(1,Math.round(h/downscale));
+      if(this.work.width!==workWidth)this.work.width=workWidth;
+      if(this.work.height!==workHeight)this.work.height=workHeight;
+      this.workCtx.clearRect(0,0,workWidth,workHeight);
+      this.workCtx.drawImage(this.base,sx,sy,sw,sh,0,0,workWidth,workHeight);
+      if(colorPass) {
+        const image=this.workCtx.getImageData(0,0,workWidth,workHeight);
+        const count=workWidth*workHeight;
+        if(this.luma.length<count)this.luma=new Uint8ClampedArray(count);
+        applyBoxPalette(image,options,this.luma);
+        this.workCtx.putImageData(image,0,0);
+      }
+      ctx.save();
+      ctx.globalAlpha=1;
+      ctx.filter=!colorPass&&options.fxInvert?'invert(1)':'none';
+      ctx.imageSmoothingEnabled=!options.fxPixelate;
+      ctx.drawImage(this.work,x,y,w,h);
+      ctx.restore();
+    }
+  }
+}
+
+
 
 const $ = id => document.getElementById(id);
 const canvas = $('outputCanvas'), ctx = canvas.getContext('2d');
@@ -523,9 +622,11 @@ const sourceCanvas = document.createElement('canvas'), sourceCtx = sourceCanvas.
 const analysis = document.createElement('canvas'), analysisCtx = analysis.getContext('2d', { willReadFrequently: true });
 const maskCanvas = document.createElement('canvas'), maskCtx = maskCanvas.getContext('2d');
 const tracker = new BlobTracker();
+const boxEffectsRenderer = new BoxEffectsRenderer();
 const defaults = { detectionMode:'bright', threshold:150, minArea:80, maxBlobs:20, smoothing:35, boxes:true, labels:true,
   centers:true, connections:true, trails:false, color:'#c5f56b', separateColors:false, boxColor:'#c5f56b', connectionColor:'#77c9ff', pointColor:'#ffb86b',
-  lineWidth:1.5, sourceOpacity:100, grayscale:false, quality:384, exportSize:'1080', includeAudio:true };
+  lineWidth:1.5, sourceOpacity:100, grayscale:false, quality:384, exportSize:'1080', includeAudio:true,
+  boxEffects:false, fxXray:true, fxZoom:false, fxPixelate:false, fxThermal:false, fxInvert:false };
 const overlayColorKeys = ['boxColor','connectionColor','pointColor'];
 const ranges = { threshold:'', minArea:' px', maxBlobs:'', smoothing:'%', lineWidth:' px', sourceOpacity:'%' };
 let settings = { ...defaults }, demo = true, playing = true, demoTime = 0, demoLast = performance.now();
@@ -558,7 +659,7 @@ function syncControls() {
     if ($(key).type === 'checkbox') $(key).checked = value; else $(key).value = value;
     if (ranges[key] !== undefined) $(`${key}Value`).textContent = `${value}${ranges[key]}`;
   }
-  syncSwatches(); syncColorControls(); updateHint();
+  syncSwatches(); syncColorControls(); syncBoxEffectControls(); updateHint();
   $('processingSize').textContent = `${settings.quality} PX ANALYSIS`;
 }
 function syncSwatches() { document.querySelectorAll('[data-color]').forEach(b=>{const active = b.dataset.color === settings.color.toLowerCase();b.classList.toggle('active',active);b.setAttribute('aria-pressed',active);}); }
@@ -566,6 +667,10 @@ function syncColorControls() {
   $('sharedColorControls').hidden=settings.separateColors;
   $('separateColorControls').hidden=!settings.separateColors;
   for(const key of overlayColorKeys){$(`${key}Hex`).value=settings[key].toUpperCase();$(`${key}Hex`).removeAttribute('aria-invalid');}
+}
+function syncBoxEffectControls() {
+  $('boxEffectsPanel').hidden=!settings.boxEffects;
+  $('boxEffects').setAttribute('aria-expanded',String(settings.boxEffects));
 }
 function updateHint() {
   $('modeHint').textContent = {bright:'Best for light subjects on a dark background.',dark:'Best for dark subjects on a light background.',motion:'Best with a fixed camera. Lower threshold detects subtler movement.'}[settings.detectionMode];
@@ -591,6 +696,7 @@ for (const key of Object.keys(defaults)) $(key).addEventListener('input', () => 
   if (key==='exportSize') resizeOutput();
   if (key==='color') syncSwatches();
   if (key==='separateColors' || overlayColorKeys.includes(key)) syncColorControls();
+  if (key==='boxEffects') syncBoxEffectControls();
   clearPreset(); dirty=true;
 });
 document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>setPreset(b.dataset.preset)));
@@ -667,6 +773,7 @@ function render(advance, sourceOverride = null) {
   if(originalView)ctx.drawImage(source,0,0,canvas.width,canvas.height);
   else if(maskView){const maskImage=maskCtx.createImageData(finalW,finalH);for(let i=0;i<tracker.mask.length;i++){const v=tracker.mask[i]?230:7,p=i*4;maskImage.data[p]=v;maskImage.data[p+1]=v;maskImage.data[p+2]=v;maskImage.data[p+3]=255;}maskCtx.putImageData(maskImage,0,0);ctx.imageSmoothingEnabled=false;ctx.drawImage(maskCanvas,0,0,canvas.width,canvas.height);ctx.imageSmoothingEnabled=true;}
   else{ctx.save();ctx.filter=settings.grayscale?'grayscale(1)':'none';ctx.globalAlpha=settings.sourceOpacity/100;ctx.drawImage(source,0,0,canvas.width,canvas.height);ctx.restore();}
+  if(!originalView&&!maskView)boxEffectsRenderer.draw(ctx,tracks,settings);
   if(!originalView)drawOverlay();
   if(advance)frame++;
   $('frameNumber').textContent=String(frame).padStart(5,'0');$('canvasBlobCount').textContent=`${String(tracks.length).padStart(2,'0')} OBJECTS`;

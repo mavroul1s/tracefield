@@ -1,6 +1,7 @@
 import { BlobTracker, connectionEdges, tuneDetection } from './tracker.mjs';
 import { validateVideoFrame, convertVideo } from './media.mjs';
 import { exportMp4, EXPORT_FPS } from './export.mjs';
+import { BoxEffectsRenderer } from './box-effects.mjs';
 
 const $ = id => document.getElementById(id);
 const canvas = $('outputCanvas'), ctx = canvas.getContext('2d');
@@ -9,9 +10,11 @@ const sourceCanvas = document.createElement('canvas'), sourceCtx = sourceCanvas.
 const analysis = document.createElement('canvas'), analysisCtx = analysis.getContext('2d', { willReadFrequently: true });
 const maskCanvas = document.createElement('canvas'), maskCtx = maskCanvas.getContext('2d');
 const tracker = new BlobTracker();
+const boxEffectsRenderer = new BoxEffectsRenderer();
 const defaults = { detectionMode:'bright', threshold:150, minArea:80, maxBlobs:20, smoothing:35, boxes:true, labels:true,
   centers:true, connections:true, trails:false, color:'#c5f56b', separateColors:false, boxColor:'#c5f56b', connectionColor:'#77c9ff', pointColor:'#ffb86b',
-  lineWidth:1.5, sourceOpacity:100, grayscale:false, quality:384, exportSize:'1080', includeAudio:true };
+  lineWidth:1.5, sourceOpacity:100, grayscale:false, quality:384, exportSize:'1080', includeAudio:true,
+  boxEffects:false, fxXray:true, fxZoom:false, fxPixelate:false, fxThermal:false, fxInvert:false };
 const overlayColorKeys = ['boxColor','connectionColor','pointColor'];
 const ranges = { threshold:'', minArea:' px', maxBlobs:'', smoothing:'%', lineWidth:' px', sourceOpacity:'%' };
 let settings = { ...defaults }, demo = true, playing = true, demoTime = 0, demoLast = performance.now();
@@ -44,7 +47,7 @@ function syncControls() {
     if ($(key).type === 'checkbox') $(key).checked = value; else $(key).value = value;
     if (ranges[key] !== undefined) $(`${key}Value`).textContent = `${value}${ranges[key]}`;
   }
-  syncSwatches(); syncColorControls(); updateHint();
+  syncSwatches(); syncColorControls(); syncBoxEffectControls(); updateHint();
   $('processingSize').textContent = `${settings.quality} PX ANALYSIS`;
 }
 function syncSwatches() { document.querySelectorAll('[data-color]').forEach(b=>{const active = b.dataset.color === settings.color.toLowerCase();b.classList.toggle('active',active);b.setAttribute('aria-pressed',active);}); }
@@ -52,6 +55,10 @@ function syncColorControls() {
   $('sharedColorControls').hidden=settings.separateColors;
   $('separateColorControls').hidden=!settings.separateColors;
   for(const key of overlayColorKeys){$(`${key}Hex`).value=settings[key].toUpperCase();$(`${key}Hex`).removeAttribute('aria-invalid');}
+}
+function syncBoxEffectControls() {
+  $('boxEffectsPanel').hidden=!settings.boxEffects;
+  $('boxEffects').setAttribute('aria-expanded',String(settings.boxEffects));
 }
 function updateHint() {
   $('modeHint').textContent = {bright:'Best for light subjects on a dark background.',dark:'Best for dark subjects on a light background.',motion:'Best with a fixed camera. Lower threshold detects subtler movement.'}[settings.detectionMode];
@@ -77,6 +84,7 @@ for (const key of Object.keys(defaults)) $(key).addEventListener('input', () => 
   if (key==='exportSize') resizeOutput();
   if (key==='color') syncSwatches();
   if (key==='separateColors' || overlayColorKeys.includes(key)) syncColorControls();
+  if (key==='boxEffects') syncBoxEffectControls();
   clearPreset(); dirty=true;
 });
 document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>setPreset(b.dataset.preset)));
@@ -153,6 +161,7 @@ function render(advance, sourceOverride = null) {
   if(originalView)ctx.drawImage(source,0,0,canvas.width,canvas.height);
   else if(maskView){const maskImage=maskCtx.createImageData(finalW,finalH);for(let i=0;i<tracker.mask.length;i++){const v=tracker.mask[i]?230:7,p=i*4;maskImage.data[p]=v;maskImage.data[p+1]=v;maskImage.data[p+2]=v;maskImage.data[p+3]=255;}maskCtx.putImageData(maskImage,0,0);ctx.imageSmoothingEnabled=false;ctx.drawImage(maskCanvas,0,0,canvas.width,canvas.height);ctx.imageSmoothingEnabled=true;}
   else{ctx.save();ctx.filter=settings.grayscale?'grayscale(1)':'none';ctx.globalAlpha=settings.sourceOpacity/100;ctx.drawImage(source,0,0,canvas.width,canvas.height);ctx.restore();}
+  if(!originalView&&!maskView)boxEffectsRenderer.draw(ctx,tracks,settings);
   if(!originalView)drawOverlay();
   if(advance)frame++;
   $('frameNumber').textContent=String(frame).padStart(5,'0');$('canvasBlobCount').textContent=`${String(tracks.length).padStart(2,'0')} OBJECTS`;

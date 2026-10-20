@@ -8,6 +8,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import * as M from '../dist/vendor/mediabunny.mjs';
 import { exportMp4, exportBitrate } from '../dist/export.mjs';
+import { BoxEffectsRenderer } from '../dist/box-effects.mjs';
 const require=createRequire(import.meta.url);
 const { createCanvas, CanvasElement, ImageData, CanvasRenderingContext2D }=require(process.env.BLOB_TRACKER_TEST_CANVAS);
 const root=path.resolve('test-artifacts');
@@ -97,13 +98,18 @@ async function inspect(blob,name,audio){
   i.dispose();console.log(name,{frames:count,audio:Boolean(a),bytes:bytes.length});return count;
 }
 const canvas=createCanvas(320,180),ctx=canvas.getContext('2d');let draws=0;
+const effectsRenderer=new BoxEffectsRenderer(()=>createCanvas(1,1));
 const demo=await exportMp4({canvas,file:null,duration:1,includeAudio:false,async renderFrame(_,t){draws++;ctx.fillStyle='black';ctx.fillRect(0,0,320,180);ctx.fillStyle='#c5f56b';ctx.fillRect(t*200,50,30,30);
   if(draws%3===0)Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,60);}});
 assert.equal(await inspect(demo,'smooth-demo.mp4',false),30);assert.equal(draws,30);
 ff(['-f','lavfi','-i','testsrc2=size=320x180:rate=15:duration=2','-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=2','-c:v','libx264','-bf','0','-c:a','aac','-shortest','input.mp4']);
 const file=new Blob([await readFile(path.join(dir,'input.mp4'))]);
 let rendered=0;
-const uploaded=await exportMp4({canvas,file,duration:2,includeAudio:true,renderFrame(source){rendered++;ctx.drawImage(source,0,0);ctx.strokeStyle='#ff3355';ctx.strokeRect(40+rendered,30,30,30);}});
+const uploaded=await exportMp4({canvas,file,duration:2,includeAudio:true,renderFrame(source){rendered++;ctx.drawImage(source,0,0);
+  const before=[...ctx.getImageData(160,90,1,1).data];
+  effectsRenderer.draw(ctx,[{x:.25,y:.25,w:.5,h:.5}],{boxEffects:true,fxThermal:true,fxPixelate:true});
+  assert.notDeepEqual([...ctx.getImageData(160,90,1,1).data],before);
+  ctx.strokeStyle='#ff3355';ctx.strokeRect(80,45,160,90);}});
 assert.equal(await inspect(uploaded,'smooth-upload-audio.mp4',true),60);assert.equal(rendered,60);
 const silent=await exportMp4({canvas,file,duration:2,includeAudio:false,renderFrame(source){ctx.drawImage(source,0,0);}});
 assert.equal(await inspect(silent,'smooth-upload-silent.mp4',false),60);
